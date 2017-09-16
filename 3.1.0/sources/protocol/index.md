@@ -1,6 +1,6 @@
 # OpenID Connect & UMA Protocol Overview
 
-The oxd server supports the OpenID Connect and UMA profiles of OAuth 2.0. OpenID Connect can be used to send a user for authentication and gather identity information about the user. UMA can be used to manage what digital resources the user should have access to.
+The oxd server supports the OpenID Connect and UMA 2 profiles of OAuth 2.0. OpenID Connect can be used to send a user for authentication and gather identity information about the user. UMA 2 can be used to manage what digital resources the user should have access to.
 
 ## OpenID Connect Authentication
 
@@ -25,25 +25,35 @@ Learn more about authentication flows in the
 [OpenID Connect spec](http://openid.net/specs/openid-connect-core-1_0.html). 
 
 ### oxd OpenID Connect APIs
-oxd provides six API's for OpenID Connect authentication. In general,
+`oxd-server` provides seven API's for OpenID Connect authentication. In general,
 you can think of the Authorization Code Flow as a three step process: 
 
  - Redirect person to the authorization URL and obtain a code
  - Use code to obtain tokens (access, id_token, refresh)
  - Use access token to obtain user claims
 
-The other three oxd API's are:
+The other four oxd API's are:
  
  - Register site (called once--the first time your application uses oxd)
  - Update site registration (not used often)
  - Logout
+ - Get access token by refresh token
+ 
+**IMPORTANT** : 
+
+In `oxd-https-extension` case before using above workflow it is required to obtain access token to secure interaction between client application and `oxd-https-extension`. 
+
+ - Setup client (returns `client_id` and `client_secret`)
+ - Get client token (pass `client_id` and `client_secret` to obtain `access_token`)
+ 
+ Pass obtained access token as `protection_access_token` to all further calls to `oxd-https-extension`.
 
 #### Register site
 
 First of all, the web site must register itself with oxd server. If 
 registration is successful, ox will return an identifier for the 
 application, which must be presented in subsequent API calls. This
-is the `oxd-id`, not to be confused with the OpenID Connect client id.
+is the `oxd_id`, not to be confused with the OpenID Connect client id.
 
 During the registration operation, oxd will dynamically register an 
 OpenID Connect client and save its configuration.
@@ -94,7 +104,8 @@ Request:
         "ui_locales": [],                                              <- OPTIONAL
         "claims_locales": [],                                          <- OPTIONAL
         "client_id": "<client id of existing client>",                 <- OPTIONAL ignores all other parameters and skips new client registration forcing to use existing client (client_secret is required if this parameter is set)
-        "client_secret": "<client secret of existing client>"          <- OPTIONAL must be used together with client_secret.
+        "client_secret": "<client secret of existing client>",         <- OPTIONAL must be used together with client_secret.
+        "protection_access_token":"<access token of the client>"       <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter        
     }
 }
 ```
@@ -138,6 +149,7 @@ Request:
         "contacts":["foo_bar@spam.org"],                              <- OPTIONAL
         "ui_locales":[],                                              <- OPTIONAL
         "claims_locales":[],                                          <- OPTIONAL
+        "protection_access_token":"<access token of the client>"      <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -168,7 +180,12 @@ Request:
         "oxd_id": "6F9619FF-8B86-D011-B42D-00CF4FC964FF", <- required, obtained after registration
         "scope": ["openid"],                              <- optional, may be skipped (by default takes scopes that was registered during register_site command)
         "acr_values": ["duo"],                            <- optional, may be skipped (default is basic)
-        "prompt": "login"                                 <- optional, skipped if no value specified or missed. prompt=login is required if you want to force alter current user session (in case user is already logged in from site1 and site2 construsts authorization request and want to force alter current user session)
+        "prompt": "login",                                <- optional, skipped if no value specified or missed. prompt=login is required if you want to force alter current user session (in case user is already logged in from site1 and site2 construsts authorization request and want to force alter current user session)
+        "custom_parameters": {                            <- optional, custom parameters
+            "param1":"value1",
+            "param2":"value2"
+        },
+        "protection_access_token":"<access token of the client>" <- optional for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -209,9 +226,10 @@ Request:
 {
     "command":"get_tokens_by_code",
     "params": {
-        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF", <- Required
-        "code":"I6IjIifX0",                              <- Required, code from OP redirect url (see example above)
-        "state":"af0ifjsldkj"                            <- Required
+        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",          <- Required
+        "code":"I6IjIifX0",                                       <- Required, code from OP redirect url (see example above)
+        "state":"af0ifjsldkj",                                    <- Required
+        "protection_access_token":"<access token of the client>"  <- Optional for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -250,8 +268,9 @@ Request:
 {
     "command":"get_user_info",
     "params": {
-        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",
-        "access_token":"SlAV32hkKG"
+        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",               <- REQUIRED
+        "access_token":"SlAV32hkKG",                                   <- REQUIRED
+        "protection_access_token":"<access token of the client>"       <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -292,10 +311,11 @@ Request:
     "command":"get_logout_uri",
     "params": {
         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",
-        "id_token_hint": "eyJ0 ... NiJ9.eyJ1c ... I6IjIifX0.DeWt4Qu ... ZXso",<-- OPTIONAL (oxd server will use last used ID Token)
-        "post_logout_redirect_uri": "<post logout redirect uri here>",        <-- OPTIONAL
-        "state": "<site state>",                                              <-- OPTIONAL
-        "session_state": "<session state>"                                    <-- OPTIONAL
+        "id_token_hint": "eyJ0 ... NiJ9.eyJ1c ... I6IjIifX0.DeWt4Qu ... ZXso",<- OPTIONAL (oxd server will use last used ID Token)
+        "post_logout_redirect_uri": "<post logout redirect uri here>",        <- OPTIONAL
+        "state": "<site state>",                                              <- OPTIONAL
+        "session_state": "<session state>",                                   <- OPTIONAL
+        "protection_access_token":"<access token of the client>"              <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -311,10 +331,126 @@ Response:
 }
 ```
 
-## UMA Authorization 
-UMA is a profile of OAuth 2.0 that defines RESTful, JSON-based, standardized flows and constructs for coordinating the protection of any API or web resource. oxd makes it easy to secure applications with UMA so that access management decisions--like who should be able to access which resources, using which devices, from which networks, etc.--can be delegated to your Gluu Server. 
+#### Setup Client
 
-### UMA Resource Server API's
+It is required to setup client if `oxd-https-extension` is used. For `oxd-server` it is not required.
+
+Parameters for Setup Client are the same as for Register Site command. The command registers client for communication protection (the one that has to be used to obtain access token (via Get Client Token command) for further passing that access token as `protection_access_token` parameter to other commands.
+
+Request:
+
+```json
+{
+    "command":"setup_client",
+    "params": {
+        "authorization_redirect_uri": "https://client.example.org/cb", <- REQUIRED
+        "op_host":"https://ce-dev.gluu.org"                            <- OPTIONAL (But if missing, must be present in defaults)
+        "post_logout_redirect_uri": "https://client.example.org/cb",   <- OPTIONAL 
+        "application_type": "web",                                     <- OPTIONAL
+        "response_types": ["code"],                                    <- OPTIONAL
+        "grant_types": ["authorization_code"],                         <- OPTIONAL 
+        "scope": ["openid"],                                           <- OPTIONAL
+        "acr_values": ["basic"],                                       <- OPTIONAL
+        "client_name": "",                                             <- OPTIONAL (But if missing, oxd will generate its own non-human readable name)
+        "client_jwks_uri": "",                                         <- OPTIONAL
+        "client_token_endpoint_auth_method": "",                       <- OPTIONAL
+        "client_request_uris": [],                                     <- OPTIONAL
+        "client_logout_uris": [],                                      <- OPTIONAL
+        "client_sector_identifier_uri": [],                            <- OPTIONAL
+        "contacts": ["foo_bar@spam.org"],                              <- OPTIONAL
+        "ui_locales": [],                                              <- OPTIONAL
+        "claims_locales": [],                                          <- OPTIONAL
+        "client_id": "<client id of existing client>",                 <- OPTIONAL ignores all other parameters and skips new client registration forcing to use existing client (client_secret is required if this parameter is set)
+        "client_secret": "<client secret of existing client>",         <- OPTIONAL must be used together with client_secret.
+        "protection_access_token":"<access token of the client>"       <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter        
+    }
+}
+```
+
+Response:
+
+```json
+{
+    "status":"ok",
+    "data":{
+        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",
+        "op_host": "<op host>",
+        "client_id":"<client id>"
+        "client_secret":"<client secret>"
+        "client_registration_access_token":"<Client registration access token>"
+        "client_registration_client_uri":"<URI of client registration>"
+        "client_id_issued_at":"<client_id issued at>"
+        "client_secret_expires_at":"<client_secret expires at>"
+    }
+}
+```
+
+#### Get Client Token
+
+Request:
+
+```json
+{
+    "command":"get_client_token",
+    "params": {
+        "client_id": "<client id>",            <- REQUIRED
+        "client_secret": "<client secret>",    <- REQUIRED
+        "op_host":"https://ce-dev.gluu.org"    <- REQUIRED
+        "op_discovery_path":""                 <- OPTIONAL 
+        "scope":[]                             <- OPTIONAL 
+    }
+}
+```
+
+Response:
+
+```json
+{
+    "status":"ok",
+    "data":{
+        "access_token":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",
+        "expires_in": 399,
+        "refresh_token": "fr459f",
+        "scope": "openid"
+    }
+}
+```
+
+#### Get Access Token by Refresh Token
+
+Gets Access Token by Refresh Token.
+
+Request:
+
+```json
+{
+    "command":"get_access_token_by_refresh_token",
+    "params": {
+        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",          <- Required
+        "refresh_token":"I6IjIifX0",                              <- Required, refresh_token from get_tokens_by_code command
+        "scope":["openid","profile"],                             <- Optional. If not specified should grant access with scope provided in previous request
+        "protection_access_token":"<access token of the client>"  <- Optional for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
+    }
+}
+```
+
+Response:
+
+```
+{
+    "status":"ok",
+    "data":{
+        "access_token":"SlAV32hkKG",
+        "expires_in":3600,
+        "refresh_token":"aaAV32hkKG1"
+    }
+}
+```
+
+## UMA 2 Authorization 
+UMA 2 is a profile of OAuth 2.0 that defines RESTful, JSON-based, standardized flows and constructs for coordinating the protection of any API or web resource. oxd makes it easy to secure applications with UMA 2 so that access management decisions--like who should be able to access which resources, using which devices, from which networks, etc.--can be delegated to your Gluu Server. 
+
+### UMA 2 Resource Server API's
 
 A client, acting as an [OAuth2 Resource Server](https://tools.ietf.org/html/rfc6749#section-1.1),
 MUST:
@@ -392,7 +528,8 @@ Request:
                     }
                 ]
             }
-        ]
+        ],
+        "protection_access_token":"<access token of the client>"      <- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -416,7 +553,8 @@ Request:
         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",
         "rpt":"eyJ0 ... NiJ9.eyJ1c ... I6IjIifX0.DeWt4Qu ... ZXso",    <-- REQUIRED RPT or blank value if absent (not send by RP)
         "path":"<path of resource>",                                   <-- REQUIRED Path of resource (e.g. http://rs.com/phones), /phones should be passed
-        "http_method":"<http method of RP request>"                    <-- REQUIRED Http method of RP request (GET, POST, PUT, DELETE)
+        "http_method":"<http method of RP request>",                   <-- REQUIRED Http method of RP request (GET, POST, PUT, DELETE)
+        "protection_access_token":"<access token of the client>"       <-- OPTIONAL for `oxd-server` but REQUIRED for `oxd-https-extension`. You can switch off/on protection by `oxd-server`'s `protect_commands_with_access_token` configuration parameter
     }
 }
 ```
@@ -487,14 +625,11 @@ Resource is not protected
 }
 ```
 
-### UMA Client API's
+### UMA 2 Client API's
 
-If your application is calling UMA protected resources, use these API's to obtain an RPT token.
+If your application is calling UMA 2 protected resources, use these API's to obtain an RPT token.
 
 #### UMA RP - Get RPT
-
-For latest and most up to date parameters of command please check 
-latest successful [jenkins build](https://ox.gluu.org/jenkins/job/oxd)
 
 Request:
 
@@ -502,54 +637,57 @@ Request:
 {
     "command":"uma_rp_get_rpt",
     "params": {
-         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",  <- REQUIRED
-         "force_new": false                                <- REQUIRED indicates whether return new RPT, in general should be false, so oxd server can cache/reuse same RPT
+         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",   <- REQUIRED
+         "ticket": "016f84e8-f9b9-11e0-bd6f-0021cc6004de",  <- REQUIRED
+         "claim_token": "eyj0f9b9...",                      <- OPTIONAL
+         "claim_token_format": "http://openid.net/specs/openid-connect-core-1_0.html#IDToken",
+         "pct": "c2F2ZWRjb25zZW50",                         <- OPTIONAL                                                      
+         "rpt": "SSJHBSUSSJHVhjsgvhsgvshgsv",               <- OPTIONAL
+         "scope":["read"],                                  <- OPTIONAL,
+         "state": "af0ifjsldkj",                            <- OPTIONAL state that is returned from uma_rp_get_claims_gathering_url command
+         "protection_access_token": "ejt3425"               <- OPTIONAL, required if oxd-https-extension is used          
     }
 }
 ```
 
-Response:
+Success Response:
 
 ```json
 {
      "status":"ok",
      "data":{
-         "rpt":"vF9dft4qmT"
+         "access_token":"SSJHBSUSSJHVhjsgvhsgvshgsv",
+         "token_type":"Bearer",
+         "pct":"c2F2ZWRjb25zZW50",
+         "upgraded":true
      }
 }
 ```
 
-#### UMA RP - Authorize RPT
-
-Request:
-
+Needs Info Error Response
 ```json
 {
-    "command":"uma_rp_authorize_rpt",
-    "params": {
-         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",  <- REQUIRED
-         "rpt": "vF9dft4qmT",                              <- REQUIRED
-         "ticket": "016f84e8-f9b9-11e0-bd6f-0021cc6004de"  <- REQUIRED
-    }
-}
-```
-
-Authorized Response (Success):
-
-```json
-{
-     "status":"ok",
-}
-```
-
-Not authorized error:
-```json
-{
-    "status":"error",
-    "data":{
-        "code":"not_authorized",
-        "description":"RPT is not authorized."
-    }
+     "status":"error",
+     "data":{
+         "error":"need_info",
+         "error_description":"The authorization server needs additional information in order to determine whether the client is authorized to have these permissions.",
+         "details": {  
+             "error":"need_info",
+             "ticket":"ZXJyb3JfZGV0YWlscw==",
+             "required_claims":[  
+                 {  
+                     "claim_token_format":[  
+                         "http://openid.net/specs/openid-connect-core-1_0.html#IDToken"
+                     ],
+                     "claim_type":"urn:oid:0.9.2342.19200300.100.1.3",
+                     "friendly_name":"email",
+                     "issuer":["https://example.com/idp"],
+                     "name":"email23423453ou453"
+                }
+             ],
+             "redirect_user":"https://as.example.com/rqp_claims?id=2346576421"
+         }
+     }
 }
 ```
 
@@ -559,57 +697,67 @@ Invalid ticket error:
 {
     "status":"error",
     "data":{
-        "code":"invalid_ticket",
-        "description":"Ticket is not valid (outdated or not present on Authorization Server)."
+        "error":"invalid_ticket",
+        "error_description":"Ticket is not valid (outdated or not present on Authorization Server)."
     }
 }
 ```
 
-Invalid rpt error:
+Internal oxd server error:
 ```json
 {
     "status":"error",
     "data":{
-        "code":"invalid_rpt",
-        "description":"RPT is not valid (outdated or not present on Authorization Server)."
+        "error":"internal_error",
+        "error_description":"oxd server failed to handle command. Please check logs for details."
     }
 }
 ```
 
-## Gluu OAuth2 Access Management API's
+#### UMA RP - Get Claims-Gathering URL
 
-GAT stands for Gluu Access Token. It is invented by Gluu and is described here: 
-[Gluu OAuth2 Access Management](https://ox.gluu.org/doku.php?id=uma:oauth2_access_management)
+`ticket` parameter for this command MUST be newest, in 90% cases it is from `need_info` error.
 
 Request:
 
 ```json
 {
-    "command":"uma_rp_get_gat",
+    "command":"uma_rp_get_claims_gathering_url",
     "params": {
-         "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",  <- REQUIRED
-         "scopes": [                                       <- REQUIRED RP should know required scopes in advance
-             "http://photoz.example.com/dev/actions/add",
-             "http://photoz.example.com/dev/actions/view",
-             "http://photoz.example.com/dev/actions/edit"
-         ]
+        "oxd_id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF",         <- REQUIRED
+        "ticket": "016f84e8-f9b9-11e0-bd6f-0021cc6004de",        <- REQUIRED
+        "claims_redirect_uri":"https://client.example.com/cb",   <- REQUIRED
+        "protection_access_token": "ejt3425"                     <- OPTIONAL, required if oxd-https-extension is used
     }
 }
 ```
 
-Response:
+Success Response:
 
 ```json
 {
-     "status":"ok",
-     "data":{
-         "rpt":"fg6vF9dft4qmT"
-     }
+    "status":"ok",
+    "data":{
+        "url":"https://as.com/restv1/uma/gather_claims
+              ?client_id=@!1736.179E.AA60.16B2!0001!8F7C.B9AB!0008!AB77!1A2B
+              &ticket=4678a107-e124-416c-af79-7807f3c31457
+              &claims_redirect_uri=https://client.example.com/cb
+              &state=af0ifjsldkj",
+        "state":"af0ifjsldkj" 
+    }
 }
+```
+
+After redirect to claims-gathering url user pass Claims-Gathering Flow and if it is success user is redirected back to `claims_redirect_uri` with new ticket which should be provided with next `uma_rp_get_rpt` call.
+
+Example of response
+
+```
+https://client.example.com/cb?ticket=e8e7bc0b-75de-4939-a9b1-2425dab3d5ec
 ```
 
 ## References
 
-- [UMA 1.0.1 Specification](https://docs.kantarainitiative.org/uma/rec-uma-core.html#permission-failure-to-client)
-- [Sample RS of Java Resteasy HTTP interceptor of uma-rs](https://github.com/GluuFederation/uma-rs/blob/master/uma-rs-resteasy/src/main/java/org/xdi/oxd/rs/protect/resteasy/RptPreProcessInterceptor.java)
-
+- [UMA 2.0 Grant for OAuth 2.0 Authorization Specification](https://docs.kantarainitiative.org/uma/ed/oauth-uma-grant-2.0-06.html)
+- [Federated Authorization for UMA 2.0 Specification](https://docs.kantarainitiative.org/uma/ed/oauth-uma-federated-authz-2.0-07.html)
+- [Java Resteasy HTTP interceptor of uma-rs](https://github.com/GluuFederation/uma-rs/blob/master/uma-rs-resteasy/src/main/java/org/xdi/oxd/rs/protect/resteasy/RptPreProcessInterceptor.java)
